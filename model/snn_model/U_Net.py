@@ -1,169 +1,186 @@
-from torch.nn import Module
+################################################
+#@markdown ### **Network**
+#@markdown
+#@markdown Defines a 1D UNet architecture `ConditionalUnet1D`
+#@markdown as the noies prediction network
+#@markdown
+#@markdown Components
+#@markdown - `SinusoidalPosEmb` Positional encoding for the diffusion iteration k
+#@markdown - `Downsample1d` Strided convolution to reduce temporal resolution
+#@markdown - `Upsample1d` Transposed convolution to increase temporal resolution
+#@markdown - `Conv1dBlock` Conv1d --> GroupNorm --> Mish
+#@markdown - `ConditionalResidualBlock1D` Takes two inputs `x` and `cond`. \
+#@markdown `x` is passed through 2 `Conv1dBlock` stacked together with residual connection.
+#@markdown `cond` is applied to `x` with [FiLM](https://arxiv.org/abs/1709.07871) conditioning.
+
+import math
+from typing import Union
 from torch import nn
 import torch
-import sys
-sys.path.append("/home/lihb/Github/bita_new_version")
-import snn.spiking_neuron as neuron
+from Spiking_UNet.snn.spiking_neuron import IF_Neuron
 
-class Denoising_Model(Module):
-    def __init__(self, color=True, stbp=False, reset_method='reduce_by_zero'):
-        super(Denoising_Model, self).__init__()
-        if color:
-            self.conv1 = nn.Conv2d(in_channels = 3, out_channels = 64, kernel_size = 3, padding = 1, bias = True)
-        else:
-            self.conv1 = nn.Conv2d(in_channels = 1, out_channels = 64, kernel_size = 3, padding = 1, bias = True)
+class SinusoidalPosEmb(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
 
-        if stbp:
-            self.relu1              = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu2              = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu3              = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu4              = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu5              = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu6              = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu7              = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu8              = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu9              = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu10             = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu_convtranpose1 = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu11             = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu12             = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu_convtranpose2 = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu13             = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu14             = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu_convtranpose3 = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu15             = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu16             = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu_convtranpose4 = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu17             = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu18             = neuron.IF_STBP(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-        else:
-            self.relu1              = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu2              = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu3              = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu4              = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu5              = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu6              = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu7              = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu8              = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu9              = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu10             = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu_convtranpose1 = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu11             = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu12             = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu_convtranpose2 = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu13             = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu14             = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu_convtranpose3 = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu15             = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu16             = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu_convtranpose4 = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu17             = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-            self.relu18             = neuron.IF_Neuron(v_threshold = 1.0,  v_reset = 0.0, reset_method = reset_method)
-
-
-        self.conv2              = nn.Conv2d(in_channels          = 64,   out_channels = 64, kernel_size   = 3, padding = 1, bias    = True)
-        self.pooling1           = nn.AvgPool2d(kernel_size       = 2,    padding      = 0)
-        self.conv3              = nn.Conv2d(in_channels          = 64,   out_channels = 128, kernel_size  = 3, padding = 1, bias    = True)
-        self.conv4              = nn.Conv2d(in_channels          = 256,  out_channels = 128, kernel_size  = 3, padding = 1, bias    = True)
-        #                       self.conv4            = nn.Conv2d(in_channels          = 128,  out_channels = 128, kernel_size  = 3, padding                     = 1, bias    = True)
-        self.pooling2           = nn.AvgPool2d(kernel_size       = 2,    padding      = 0)
-        self.conv5              = nn.Conv2d(in_channels          = 128,  out_channels = 256, kernel_size  = 3, padding = 1, bias    = True)
-        self.conv6              = nn.Conv2d(in_channels          = 512,  out_channels = 256, kernel_size  = 3, padding = 1, bias    = True)
-        #                       self.conv6            = nn.Conv2d(in_channels          = 256,  out_channels = 256, kernel_size  = 3, padding                     = 1, bias    = True)
-        self.pooling3           = nn.AvgPool2d(kernel_size       = 2,    padding      = 0)
-        self.conv7              = nn.Conv2d(in_channels          = 256,  out_channels = 512, kernel_size  = 3, padding = 1, bias    = True)
-        self.conv8              = nn.Conv2d(in_channels          = 1024,  out_channels = 512, kernel_size  = 3, padding= 1, bias    = True)
-        #                       self.conv8            = nn.Conv2d(in_channels          = 512,  out_channels = 512, kernel_size  = 3, padding                     = 1, bias    = True)
-        self.pooling4           = nn.AvgPool2d(kernel_size       = 2,    padding      = 0)
-        self.conv9              = nn.Conv2d(in_channels          = 512,  out_channels = 1024, kernel_size = 3, padding = 1, bias    = True)
-        self.conv10             = nn.Conv2d(in_channels          = 2048, out_channels = 1024, kernel_size = 3, padding = 1, bias    = True)
-        #                       self.conv10           = nn.Conv2d(in_channels          = 1024, out_channels = 1024, kernel_size = 3, padding                     = 1, bias    = True)
-        self.conv11             = nn.Conv2d(in_channels          = 1024, out_channels = 512, kernel_size  = 3, padding     = 1, bias    = True)
-        self.conv12             = nn.Conv2d(in_channels          = 512,  out_channels = 512, kernel_size  = 3, padding     = 1, bias    = True)
-        self.conv13             = nn.Conv2d(in_channels          = 512,  out_channels = 256, kernel_size  = 3, padding     = 1, bias    = True)
-        self.conv14             = nn.Conv2d(in_channels          = 256,  out_channels = 256, kernel_size  = 3, padding     = 1, bias    = True)
-        self.conv15             = nn.Conv2d(in_channels          = 256,  out_channels = 128, kernel_size  = 3, padding     = 1, bias    = True)
-        self.conv16             = nn.Conv2d(in_channels          = 128,  out_channels = 128, kernel_size  = 3, padding     = 1, bias    = True)
-        self.conv17             = nn.Conv2d(in_channels          = 128,  out_channels = 64, kernel_size   = 3, padding     = 1, bias    = True)
-        self.conv18             = nn.Conv2d(in_channels          = 64,   out_channels = 64, kernel_size   = 3, padding     = 1, bias    = True)
-
-        self.convtranspose1     = nn.ConvTranspose2d(in_channels = 1024, out_channels = 512, stride       = 2, kernel_size = 3, padding = 1, output_padding = 1, bias = True)
-        self.convtranspose2     = nn.ConvTranspose2d(in_channels = 512,  out_channels = 256, stride       = 2, kernel_size = 3, padding = 1, output_padding = 1, bias = True)
-        self.convtranspose3     = nn.ConvTranspose2d(in_channels = 256,  out_channels = 128, stride       = 2, kernel_size = 3, padding = 1, output_padding = 1, bias = True)
-        self.convtranspose4     = nn.ConvTranspose2d(in_channels = 128,  out_channels = 64, stride        = 2, kernel_size = 3, padding = 1, output_padding = 1, bias = True)
-
-        if color:
-            self.conv19 = nn.Conv2d(in_channels = 64, out_channels = 3, kernel_size = 3, padding = 1, bias = True)
-        else:
-            self.conv19 = nn.Conv2d(in_channels = 64, out_channels = 1, kernel_size = 3, padding = 1, bias = True)
-
-        self.conv_d1 = nn.Conv2d(in_channels = 64, out_channels  = 128, kernel_size  = 2, stride = 2, bias = True)
-        self.conv_d2 = nn.Conv2d(in_channels = 128, out_channels = 256, kernel_size  = 2, stride = 2, bias = True)
-        self.conv_d3 = nn.Conv2d(in_channels = 256, out_channels = 512, kernel_size  = 2, stride = 2, bias = True)
-        self.conv_d4 = nn.Conv2d(in_channels = 512, out_channels = 1024, kernel_size = 2, stride = 2, bias = True)
-    
     def forward(self, x):
-        x_1 = self.conv1(x)
-        x_1 = self.relu1(x_1)
+        device = x.device
+        half_dim = self.dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+        emb = x[:, None] * emb[None, :]
+        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
+        return emb
 
-        x_1 = self.conv2(x_1)
-        x_1 = self.relu2(x_1)
-        x_d1 = self.conv_d1(x_1)
-        down_x1 = self.pooling1(x_1)
-        x_2 = self.conv3(down_x1)
-        x_2 = self.relu3(x_2)
-        x_2 = torch.cat((x_d1, x_2), dim = 1)
-        x_2 = self.conv4(x_2)
-        x_2 = self.relu4(x_2)
-        x_d2 = self.conv_d2(x_2)
-        down_x2 = self.pooling2(x_2)
-        x_3 = self.conv5(down_x2)
-        x_3 = self.relu5(x_3)
-        x_3 = torch.cat((x_d2, x_3), dim = 1)
-        x_3 = self.conv6(x_3)
-        x_3 = self.relu6(x_3)
-        x_d3 = self.conv_d3(x_3)
-        down_x3 = self.pooling3(x_3)
-        x_4 = self.conv7(down_x3)
-        x_4 = self.relu7(x_4)
-        x_4 = torch.cat((x_d3, x_4), dim = 1)
-        x_4 = self.conv8(x_4)
-        x_4 = self.relu8(x_4)
-        x_d4 = self.conv_d4(x_4)
-        down_x4 = self.pooling4(x_4)
-        x_5 = self.conv9(down_x4)
-        x_5 = self.relu9(x_5)
-        x_5 = torch.cat((x_d4, x_5), dim = 1)
-        x_5 = self.conv10(x_5)
-        x_5 = self.relu10(x_5)
-        up1 = self.convtranspose1(x_5)
-        up1 = self.relu_convtranpose1(up1)
-        concat1 = torch.cat((x_4, up1), dim = 1)
-        x_6 = self.conv11(concat1)
-        x_6 = self.relu11(x_6)
-        x_6 = self.conv12(x_6)
-        x_6 = self.relu12(x_6)
-        up2 = self.convtranspose2(x_6)
-        up2 = self.relu_convtranpose2(up2)
-        concat2 = torch.cat((x_3, up2), dim = 1)
-        x_7 = self.conv13(concat2)
-        x_7 = self.relu13(x_7)
-        x_7 = self.conv14(x_7)
-        x_7 = self.relu14(x_7)
-        up3 = self.convtranspose3(x_7)
-        up3 = self.relu_convtranpose3(up3)
-        concat3 = torch.cat((x_2, up3), dim = 1)
-        x_8 = self.conv15(concat3)
-        x_8 = self.relu15(x_8)
-        x_8 = self.conv16(x_8)
-        x_8 = self.relu16(x_8)
-        up4 = self.convtranspose4(x_8)
-        up4 = self.relu_convtranpose4(up4)
-        concat4 = torch.cat((x_1, up4), dim = 1)
-        x_9 = self.conv17(concat4)
-        x_9 = self.relu17(x_9)
-        x_9 = self.conv18(x_9)
-        x_9 = self.relu18(x_9)
-        output = self.conv19(x_9)
-        
-        return output
+class Downsample1d(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.conv = nn.Conv1d(dim, dim, 3, 2, 1)
+
+    def forward(self, x):
+        return self.conv(x)
+
+class Upsample1d(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.conv = nn.ConvTranspose1d(dim, dim, 4, 2, 1)
+
+    def forward(self, x):
+        return self.conv(x)
+
+class SpikingConv1dBlock(nn.Module):
+    def __init__(self, inp_channels, out_channels, kernel_size, n_groups=8, reset_method='reduce_by_zero'):
+        super().__init__()
+
+        self.block = nn.Sequential(
+            nn.Conv1d(inp_channels, out_channels, kernel_size, padding=kernel_size // 2),
+            nn.GroupNorm(n_groups, out_channels),
+            IF_Neuron(v_threshold=1.0, v_reset=0.0, reset_method=reset_method)
+        )
+
+    def forward(self, x):
+        return self.block(x)
+
+class SpikingConditionalResidualBlock1D(nn.Module):
+    def __init__(self, in_channels, out_channels, cond_dim, kernel_size=3, n_groups=8, reset_method='reduce_by_zero'):
+        super().__init__()
+
+        self.blocks = nn.ModuleList([
+            SpikingConv1dBlock(in_channels, out_channels, kernel_size, n_groups=n_groups, reset_method=reset_method),
+            SpikingConv1dBlock(out_channels, out_channels, kernel_size, n_groups=n_groups, reset_method=reset_method),
+        ])
+
+        cond_channels = out_channels * 2
+        self.out_channels = out_channels
+        self.cond_encoder = nn.Sequential(
+            IF_Neuron(v_threshold=1.0, v_reset=0.0, reset_method=reset_method),
+            nn.Linear(cond_dim, cond_channels),
+            nn.Unflatten(-1, (-1, 1))
+        )
+
+        self.residual_conv = nn.Conv1d(in_channels, out_channels, 1) if in_channels != out_channels else nn.Identity()
+
+    def forward(self, x, cond):
+        out = self.blocks[0](x)
+        embed = self.cond_encoder(cond)
+
+        embed = embed.reshape(embed.shape[0], 2, self.out_channels, 1)
+        scale = embed[:,0,...]
+        bias = embed[:,1,...]
+        out = scale * out + bias
+
+        out = self.blocks[1](out)
+        out = out + self.residual_conv(x)
+        return out
+
+class SpikingConditionalUnet1D(nn.Module):
+    def __init__(self, input_dim, global_cond_dim, diffusion_step_embed_dim=256, down_dims=[256,512,1024], kernel_size=5, n_groups=8, reset_method='reduce_by_zero'):
+        super().__init__()
+        all_dims = [input_dim] + list(down_dims)
+        start_dim = down_dims[0]
+
+        dsed = diffusion_step_embed_dim
+        diffusion_step_encoder = nn.Sequential(
+            SinusoidalPosEmb(dsed),
+            nn.Linear(dsed, dsed * 4),
+            IF_Neuron(v_threshold=1.0, v_reset=0.0, reset_method=reset_method),
+            nn.Linear(dsed * 4, dsed),
+        )
+        cond_dim = dsed + global_cond_dim
+
+        in_out = list(zip(all_dims[:-1], all_dims[1:]))
+        mid_dim = all_dims[-1]
+
+        self.mid_modules = nn.ModuleList([
+            SpikingConditionalResidualBlock1D(mid_dim, mid_dim, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups, reset_method=reset_method),
+            SpikingConditionalResidualBlock1D(mid_dim, mid_dim, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups, reset_method=reset_method),
+        ])
+
+        down_modules = nn.ModuleList([])
+        for ind, (dim_in, dim_out) in enumerate(in_out):
+            is_last = ind >= (len(in_out) - 1)
+            down_modules.append(nn.ModuleList([
+                SpikingConditionalResidualBlock1D(dim_in, dim_out, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups, reset_method=reset_method),
+                SpikingConditionalResidualBlock1D(dim_out, dim_out, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups, reset_method=reset_method),
+                Downsample1d(dim_out) if not is_last else nn.Identity()
+            ]))
+
+        up_modules = nn.ModuleList([])
+        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
+            is_last = ind >= (len(in_out) - 1)
+            up_modules.append(nn.ModuleList([
+                SpikingConditionalResidualBlock1D(dim_out*2, dim_in, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups, reset_method=reset_method),
+                SpikingConditionalResidualBlock1D(dim_in, dim_in, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups, reset_method=reset_method),
+                Upsample1d(dim_in) if not is_last else nn.Identity()
+            ]))
+
+        final_conv = nn.Sequential(
+            SpikingConv1dBlock(start_dim, start_dim, kernel_size=kernel_size, reset_method=reset_method),
+            nn.Conv1d(start_dim, input_dim, 1),
+        )
+
+        self.diffusion_step_encoder = diffusion_step_encoder
+        self.up_modules = up_modules
+        self.down_modules = down_modules
+        self.final_conv = final_conv
+
+        print("number of parameters: {:e}".format(
+            sum(p.numel() for p in self.parameters()))
+        )
+
+    def forward(self, sample, timestep, global_cond=None):
+        sample = sample.moveaxis(-1, -2)
+
+        timesteps = timestep
+        if not torch.is_tensor(timesteps):
+            timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
+        elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
+            timesteps = timesteps[None].to(sample.device)
+        timesteps = timesteps.expand(sample.shape[0])
+
+        global_feature = self.diffusion_step_encoder(timesteps)
+
+        if global_cond is not None:
+            global_feature = torch.cat([global_feature, global_cond], axis=-1)
+
+        x = sample
+        h = []
+        for resnet, resnet2, downsample in self.down_modules:
+            x = resnet(x, global_feature)
+            x = resnet2(x, global_feature)
+            h.append(x)
+            x = downsample(x)
+
+        for mid_module in self.mid_modules:
+            x = mid_module(x, global_feature)
+
+        for resnet, resnet2, upsample in self.up_modules:
+            x = torch.cat((x, h.pop()), dim=1)
+            x = resnet(x, global_feature)
+            x = resnet2(x, global_feature)
+            x = upsample(x)
+
+        x = self.final_conv(x)
+        x = x.moveaxis(-1, -2)
+        return x
